@@ -1,0 +1,56 @@
+name: Terraform Plan — Stage
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  TF_VAR_FILE:    environments/stage/stage.tfvars
+  BACKEND_CONFIG: environments/stage/backend.hcl
+  AWS_REGION:     eu-west-2
+
+jobs:
+  terraform-plan:
+    name: Plan (stage)
+    runs-on: ubuntu-latest
+    environment: stage
+    defaults:
+      run:
+        working-directory: terraform
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ">= 1.14.4"
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.STAGE_TF_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Create sf-deploy AWS profile for Terraform
+        run: |
+          aws configure set aws_access_key_id     "$AWS_ACCESS_KEY_ID"     --profile sf-deploy
+          aws configure set aws_secret_access_key "$AWS_SECRET_ACCESS_KEY" --profile sf-deploy
+          aws configure set aws_session_token     "$AWS_SESSION_TOKEN"     --profile sf-deploy
+          aws configure set region                "${{ env.AWS_REGION }}"  --profile sf-deploy
+
+      - name: Terraform Init
+        run: terraform init -backend-config=${{ env.BACKEND_CONFIG }} -reconfigure
+
+      - name: Terraform Plan
+        env:
+          TF_VAR_github_token:     ${{ secrets.TF_VAR_GITHUB_TOKEN }}
+          TF_VAR_ATLAS_PUBLIC_KEY: ${{ secrets.ATLAS_PUBLIC_KEY }}
+        run: |
+          terraform plan \
+            -var-file=${{ env.TF_VAR_FILE }} \
+            -no-color
